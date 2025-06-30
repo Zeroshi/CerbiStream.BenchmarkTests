@@ -42,7 +42,7 @@ namespace CerbiBenchmark
 
             _serilogPlain = BuildLogger(s =>
             {
-                var serilog = new LoggerConfiguration().WriteTo.Console().CreateLogger();
+                var serilog = new LoggerConfiguration().WriteTo.File("serilog-benchmark.log").CreateLogger();
                 s.AddLogging(b => b.AddSerilog(serilog));
             });
             _serilogEncrypted = _serilogPlain;
