@@ -19,6 +19,9 @@ using NLogManager = NLog.LogManager;
 using SerilogLogger = Serilog.ILogger;
 using System.IO;
 using Serilog.Sinks.Async;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Collections.Generic;
 
 namespace CerbiBenchmark
 {
@@ -44,6 +47,18 @@ namespace CerbiBenchmark
         private string _manyPropsMessageFormat;
         private object[] _manyPropsValues;
         private Exception _sampleException;
+
+        // PII payloads for governance tests
+        private string _piiEmail;
+        private string _piiCc;
+        private string _piiSsn;
+        private string _piiNoteBig;
+        private Dictionary<string, object> _piiStructured;
+
+        // Governance regex rules (compiled)
+        private Regex _rxEmail;
+        private Regex _rxCc;
+        private Regex _rxSsn;
 
         private string EncryptBase64(string input) => Convert.ToBase64String(Encoding.UTF8.GetBytes(input));
 
@@ -171,6 +186,64 @@ namespace CerbiBenchmark
             _manyPropsValues = new object[] { 12345, "ORD-987654", "sess-42", "192.0.2.1", "US", "Widget", 3, 19.99, "USD", true, 12.4, Guid.NewGuid() };
 
             _sampleException = new InvalidOperationException("Sample exception for logging benchmark");
+
+            // PII payloads for governance tests
+            _piiEmail = "john.doe@example.com";
+            _piiCc = "4111-1111-1111-1111";
+            _piiSsn = "123-45-6789";
+            _piiNoteBig = new string('A', 1024) + " Note contains email " + _piiEmail + " and cc " + _piiCc + " and ssn " + _piiSsn;
+            _piiStructured = new Dictionary<string, object>
+            {
+                ["User"] = "jdoe",
+                ["Email"] = _piiEmail,
+                ["CC"] = _piiCc,
+                ["SSN"] = _piiSsn,
+                ["Note"] = _piiNoteBig,
+                ["Amount"] = 199.99,
+                ["Flag"] = true
+            };
+
+            // governance regexes
+            _rxEmail = new Regex(@"(?<user>[a-zA-Z0-9_.+-]+)@(?<host>[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+            _rxCc = new Regex(@"\b(?:\d[ -]*?){13,19}\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+            _rxSsn = new Regex(@"\b\d{3}-\d{2}-\d{4}\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+            // Load governance.json if present
+            var govPath = Path.Combine(AppContext.BaseDirectory, "governance.json");
+            if (File.Exists(govPath))
+            {
+                try
+                {
+                    var json = File.ReadAllText(govPath);
+                    var cfg = JsonSerializer.Deserialize<GovernanceConfig>(json, new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+                    if (cfg != null)
+                    {
+                        _govRegexRules.Clear();
+                        foreach (var r in cfg.piiRules)
+                        {
+                            var opts = RegexOptions.CultureInvariant;
+                            if (r.options != null)
+                            {
+                                foreach (var o in r.options)
+                                {
+                                    if (string.Equals(o, "Compiled", StringComparison.OrdinalIgnoreCase)) opts |= RegexOptions.Compiled;
+                                    if (string.Equals(o, "IgnoreCase", StringComparison.OrdinalIgnoreCase)) opts |= RegexOptions.IgnoreCase;
+                                }
+                            }
+                            _govRegexRules.Add((new Regex(r.pattern, opts), r.replacement));
+                        }
+                        _govRequired = new HashSet<string>(cfg.schema?.requiredFields ?? Array.Empty<string>(), StringComparer.Ordinal);
+                        _govOnContainsPII = cfg.actions?.onContainsPII ?? "redact";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Governance JSON load failed: {ex.Message}");
+                }
+            }
         }
 
         // No-op logger provider to act as a null sink for all loggers
@@ -208,6 +281,98 @@ namespace CerbiBenchmark
             return services.BuildServiceProvider()
                 .GetRequiredService<ILoggerFactory>()
                 .CreateLogger("Benchmark");
+        }
+
+        // Governance helpers
+        private string RedactPII(string input)
+        {
+            var red = _rxEmail.Replace(input, m => "***@" + (m.Groups["host"].Value ?? "***"));
+            red = _rxCc.Replace(red, _ => "****-****-****-****");
+            red = _rxSsn.Replace(red, _ => "***-**-****");
+            return red;
+        }
+
+        private bool ContainsPII(string input)
+        {
+            return _rxEmail.IsMatch(input) || _rxCc.IsMatch(input) || _rxSsn.IsMatch(input);
+        }
+
+        private Dictionary<string, object> RedactPII(Dictionary<string, object> data)
+        {
+            var copy = new Dictionary<string, object>(data.Count);
+            foreach (var kvp in data)
+            {
+                if (kvp.Value is string s)
+                {
+                    copy[kvp.Key] = RedactPII(s);
+                }
+                else
+                {
+                    copy[kvp.Key] = kvp.Value;
+                }
+            }
+            return copy;
+        }
+
+        private bool ValidateSchema(Dictionary<string, object> data)
+        {
+            // Required: User, Email, Amount
+            return data.ContainsKey("User") && data.ContainsKey("Email") && data.ContainsKey("Amount");
+        }
+
+        // JSON-governed helpers (types and state)
+        private record GovernanceRule(string name, string pattern, string replacement, string[]? options);
+        private record GovernanceSchema(string[]? requiredFields);
+        private record GovernanceConfig(string version, GovernanceRule[] piiRules, GovernanceSchema schema, GovernanceActions actions);
+        private record GovernanceActions(string onContainsPII);
+        private List<(Regex Rx, string Replacement)> _govRegexRules = new();
+        private HashSet<string> _govRequired = new(StringComparer.Ordinal);
+        private string _govOnContainsPII = "redact";
+
+        // JSON-governed helper implementations
+        private string ApplyGovernanceRedaction(string input)
+        {
+            var text = input;
+            foreach (var (Rx, Replacement) in _govRegexRules)
+            {
+                text = Rx.Replace(text, Replacement);
+            }
+            return text;
+        }
+
+        private Dictionary<string, object> ApplyGovernanceRedaction(Dictionary<string, object> data)
+        {
+            var copy = new Dictionary<string, object>(data.Count, StringComparer.Ordinal);
+            foreach (var kv in data)
+            {
+                if (kv.Value is string s)
+                {
+                    copy[kv.Key] = ApplyGovernanceRedaction(s);
+                }
+                else
+                {
+                    copy[kv.Key] = kv.Value;
+                }
+            }
+            return copy;
+        }
+
+        private bool GovernanceContainsPII(string input)
+        {
+            foreach (var (Rx, _) in _govRegexRules)
+            {
+                if (Rx.IsMatch(input)) return true;
+            }
+            return false;
+        }
+
+        private bool GovernanceValidateSchema(Dictionary<string, object> data)
+        {
+            foreach (var req in _govRequired)
+            {
+                if (!data.ContainsKey(req)) return false;
+            }
+            return true;
         }
 
         [Benchmark(Baseline = true)]
@@ -274,6 +439,45 @@ namespace CerbiBenchmark
 
         [Benchmark]
         public void Cerbi_Minimal_Async() => _cerbi_minimal_async.LogInformation("Cerbi Minimal+Async: Logging at {time}", DateTime.UtcNow);
+
+        // --- Governance simulation scenarios ---
+
+        // Redact simple PII in a single string then log
+        [Benchmark]
+        public void Cerbi_Governance_Redact_Simple()
+        {
+            var msg = $"User email={_piiEmail} cc={_piiCc} ssn={_piiSsn} note={_piiNoteBig}";
+            var red = RedactPII(msg);
+            _cerbiPlain.LogInformation("{msg}", red);
+        }
+
+        // Validate presence of PII without redacting; drop or log accordingly
+        [Benchmark]
+        public void Cerbi_Governance_ValidateOnly()
+        {
+            var msg = $"email={_piiEmail} cc={_piiCc} note={_piiNoteBig}";
+            if (!ContainsPII(msg))
+                _cerbiPlain.LogInformation("{msg}", msg);
+            else
+                _cerbiPlain.LogInformation("{msg}", "BLOCKED");
+        }
+
+        // Structured redaction across a dictionary of properties
+        [Benchmark]
+        public void Cerbi_Governance_Redact_Structured()
+        {
+            var red = RedactPII(_piiStructured);
+            _cerbiPlain.LogInformation("PII {@data}", red);
+        }
+
+        // Schema + redaction combined (heavier ruleset)
+        [Benchmark]
+        public void Cerbi_Governance_Heavy()
+        {
+            var ok = ValidateSchema(_piiStructured);
+            var data = ok ? RedactPII(_piiStructured) : _piiStructured;
+            _cerbiPlain.LogInformation("PII {@data}", data);
+        }
 
         // --- Extended scenarios ---
 
@@ -346,6 +550,40 @@ namespace CerbiBenchmark
         {
             for (int i = 0; i < 1000; i++)
                 _cerbiPlain.LogInformation("Cerbi Batch: {i} {t}", i, DateTime.UtcNow);
+        }
+
+        // Benchmarks using governance JSON
+        [Benchmark]
+        public void Cerbi_GovernanceJson_Redact_Simple()
+        {
+            var msg = $"User email={_piiEmail} cc={_piiCc} ssn={_piiSsn} note={_piiNoteBig}";
+            var red = ApplyGovernanceRedaction(msg);
+            _cerbiPlain.LogInformation("{msg}", red);
+        }
+
+        [Benchmark]
+        public void Cerbi_GovernanceJson_ValidateOnly()
+        {
+            var msg = $"email={_piiEmail} cc={_piiCc} note={_piiNoteBig}";
+            if (!GovernanceContainsPII(msg))
+                _cerbiPlain.LogInformation("{msg}", msg);
+            else
+                _cerbiPlain.LogInformation("{msg}", _govOnContainsPII.Equals("drop", StringComparison.OrdinalIgnoreCase) ? "BLOCKED" : ApplyGovernanceRedaction(msg));
+        }
+
+        [Benchmark]
+        public void Cerbi_GovernanceJson_Redact_Structured()
+        {
+            var red = ApplyGovernanceRedaction(_piiStructured);
+            _cerbiPlain.LogInformation("PII {@data}", red);
+        }
+
+        [Benchmark]
+        public void Cerbi_GovernanceJson_Heavy()
+        {
+            var ok = GovernanceValidateSchema(_piiStructured);
+            var data = ok ? ApplyGovernanceRedaction(_piiStructured) : _piiStructured;
+            _cerbiPlain.LogInformation("PII {@data}", data);
         }
     }
 }

@@ -81,3 +81,23 @@ Why are many results so similar? Because with a no‑op sink and `IsEnabled=fals
 - Keep hot‑path logs lean (fewer structured properties, small messages).
 - Avoid pushing large payloads through logging; log identifiers and store blobs separately.
 - Measure in your environment; I/O and filtering change results more than library choice.
+
+---
+
+## 🛡️ Governance benchmarks (simulated real-time)
+
+To approximate runtime governance, I added regex-based PII detection/redaction and simple schema validation around `CerbiStream` calls, using the normalized null sink to isolate CPU overhead (no I/O).
+
+Key results (from latest run):
+- `Cerbi_Governance_Redact_Simple` — Mean: ~42,131 ns, Alloc: ~11,632 B
+- `Cerbi_Governance_ValidateOnly` — Mean: ~492 ns, Alloc: ~2,392 B
+- `Cerbi_Governance_Redact_Structured` — Mean: ~42,159 ns, Alloc: ~9,296 B
+- `Cerbi_Governance_Heavy` (schema + redaction) — Mean: ~42,418 ns, Alloc: ~9,296 B
+
+Interpretation:
+- Validation-only checks are sub-microsecond and very cheap.
+- Redaction with compiled regexes dominates cost (~42 µs), largely independent of the logger.
+- Structured payload redaction is similar to simple-string redaction when most work is regex scanning.
+- For hot paths, prefer validation-only or targeted redaction; batch or offload heavy redaction.
+
+Caveat: This is an application-level simulation. If `CerbiStream` exposes native governance features (e.g., built-in validators/redactors), wire them directly to measure its internal implementation. I can update the suite if you provide the specific governance APIs to call.

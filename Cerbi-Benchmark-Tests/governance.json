@@ -1,0 +1,29 @@
+{
+ "version": "1.0",
+ "piiRules": [
+ {
+ "name": "email",
+ "pattern": "(?<user>[a-zA-Z0-9_.+-]+)@(?<host>[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+)",
+ "replacement": "***@${host}",
+ "options": ["Compiled", "CultureInvariant"]
+ },
+ {
+ "name": "creditCard",
+ "pattern": "\\b(?:\\d[ -]*?){13,19}\\b",
+ "replacement": "****-****-****-****",
+ "options": ["Compiled", "CultureInvariant"]
+ },
+ {
+ "name": "ssn",
+ "pattern": "\\b\\d{3}-\\d{2}-\\d{4}\\b",
+ "replacement": "***-**-****",
+ "options": ["Compiled", "CultureInvariant"]
+ }
+ ],
+ "schema": {
+ "requiredFields": ["User", "Email", "Amount"]
+ },
+ "actions": {
+ "onContainsPII": "redact" 
+ }
+}
