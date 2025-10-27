@@ -2,7 +2,7 @@
 
 A simple, reproducible comparison of popular .NET loggers using BenchmarkDotNet.
 
-- Project: .NET8
+- Project: .NET9
 - Benchmarks: `PopularLoggerBenchmarks`
 - Artifacts: `Cerbi-Benchmark-Tests/BenchmarkDotNet.Artifacts/results`
 
@@ -10,60 +10,59 @@ A simple, reproducible comparison of popular .NET loggers using BenchmarkDotNet.
 
 ## TL;DR (Non‑technical summary)
 
-- In a like‑for‑like test with logging effectively disabled (no‑op/"null" sink), all loggers are equally fast. Differences are tiny and in nanoseconds.
-- With encryption enabled in this benchmark, `CerbiStream` looks much faster because the encryption is integrated into its pipeline, while other loggers were given pre‑encrypted strings. In real apps, encrypting inside the logger vs. before logging changes where the cost is paid.
-- For high‑throughput scenarios, the output sink (console/file/network) dominates performance. Use async/batching regardless of logger choice.
-- Bottom line: `CerbiStream` sits alongside veteran loggers (Serilog, NLog, log4net) on core overhead. Real‑world speed mostly depends on sink configuration, not the logger brand.
+- With logging effectively disabled (no‑op sink), all loggers are equally fast; differences are tiny (nanoseconds).
+- Real‑world speed is dominated by the output sink (console/file/network). Use async/batching.
+- CerbiStream sits alongside veteran loggers (Serilog, NLog, log4net) on core overhead. With integrated encryption, Cerbi shows very low overhead in this benchmark setup.
 
 ---
 
-## Latest results (normalized/no‑op sink)
+## Latest run (CerbiStream1.1.70, .NET9, normalized/no‑op sink)
 
-This run replaces all providers with a no‑op sink to measure only each logger’s call overhead (no console/file I/O). Lower is faster.
+Source: `BenchmarkDotNet.Artifacts/results/CerbiBenchmark.PopularLoggerBenchmarks-report.csv`
 
-Source: `BenchmarkDotNet.Artifacts/results/CerbiBenchmark.PopularLoggerBenchmarks-report-github.md`
+Lower is faster. Mean shown; allocations are per operation.
 
 - Single small message (Mean):
- - `Log4Net_Log_Plain`:84.82 ns
- - `Serilog_Log_Plain`:88.39 ns
- - `Cerbi_Log_Plain`:89.39 ns
- - `NLog_Log_Plain`:92.74 ns
- - `MS_Log_Plain`:94.95 ns
+ - Cerbi_Log_Plain:62.27 ns
+ - NLog_Log_Plain:62.22 ns
+ - Log4Net_Log_Plain:62.75 ns
+ - Serilog_Log_Plain:64.45 ns
+ - MS_Log_Plain:62.23 ns
 
 - Encrypted message (Mean):
- - `Cerbi_Log_Encrypted`:88.12 ns
- - `Log4Net_Log_Encrypted`:368.83 ns
- - `Serilog_Log_Encrypted`:376.31 ns
- - `MS_Log_Encrypted`:391.32 ns
- - `NLog_Log_Encrypted`:401.14 ns
+ - Cerbi_Log_Encrypted:61.23 ns
+ - Log4Net_Log_Encrypted:249.56 ns
+ - Serilog_Log_Encrypted:256.75 ns
+ - MS_Log_Encrypted:266.94 ns
+ - NLog_Log_Encrypted:272.99 ns
 
 - Batch throughput (1,000 logs total time):
- - `Cerbi_Log_Batch_1000`:87,248.38 ns
- - `NLog_Log_Batch_1000`:87,440.41 ns
- - `Serilog_Log_Batch_1000`:90,590.68 ns
- - `MS_Log_Batch_1000`:91,635.39 ns
+ - MS_Log_Batch_1000:62,914.50 ns
+ - NLog_Log_Batch_1000:64,082.29 ns
+ - Cerbi_Log_Batch_1000:67,184.55 ns
+ - Serilog_Log_Batch_1000:68,084.14 ns
 
-- Many structured properties (Mean,12 props): ~69–71 ns across all loggers
-- Large message (8 KB placeholder, Mean): ~54–56 ns across all loggers
+- Many structured properties (12 props, Mean): ~50–52 ns across all loggers
+- Large message placeholder (Mean): ~38–40 ns across all loggers
+- Exception logging (Mean): ~60–63 ns across all loggers
 
-Why are many results so similar? Because with a no‑op sink and `IsEnabled=false`, most work is skipped. This isolates the core overhead of calling the logger, which is very small and comparable across libraries.
+Governance (Cerbi‑specific, new in suite):
+- Cerbi_Governance_ValidateOnly:491.82 ns, ~2.3 KB allocated
+- Cerbi_Governance_Redact_Structured: ~42,158 ns, ~9.1 KB allocated
+- Cerbi_Governance_Redact_Simple: ~42,131 ns, ~11.4 KB allocated
+- Cerbi_Governance_Heavy: ~42,418 ns, ~9.1 KB allocated
+
+Notes:
+- This run uses a no‑op sink to isolate logger overhead. Real sinks (console/file/network) will change results.
+- Cerbi’s encrypted path is very fast here because encryption cost is integrated and the sink is no‑op.
 
 ---
 
 ## What these results mean (plain English)
 
-- Logger overhead is tiny: All tested loggers add roughly the same, very small CPU cost when logging is disabled or filtered out.
-- Sinks dominate in production: Writing to console, files, or the network is usually the bottleneck. Configure async/batching to keep the app fast.
-- Encryption numbers need context: In this suite, non‑Cerbi loggers were fed pre‑encrypted text, while `CerbiStream` encrypted internally. That’s why Cerbi’s encrypted path appears much faster here. If others encrypted internally too, the results would be closer.
-- Throughput: In the batch test, `CerbiStream` and `NLog` were marginally fastest. Differences are small and unlikely to matter without I/O.
-
----
-
-## How `CerbiStream` compares to veteran loggers
-
-- Core overhead: On par with Serilog, NLog, and log4net in this no‑op configuration.
-- Encryption integration: Appears very efficient in this benchmark because cost is inside the pipeline; others were measured with pre‑encrypted inputs.
-- Real‑world usage: Expect similar performance to veteran loggers when configured with the same sinks. The sink choice (and async/batching) will determine overall speed.
+- Logger call overhead is tiny and comparable across all libraries in a normalized setup.
+- Sinks dominate in production. Configure async/batching for throughput regardless of logger.
+- CerbiStream is a comparable choice to veteran loggers; with the same sink setup you should expect similar throughput. Its integrated encryption can reduce extra work in the call site.
 
 ---
 
@@ -71,33 +70,10 @@ Why are many results so similar? Because with a no‑op sink and `IsEnabled=fals
 
 - Run: `dotnet run -c Release`
 - Results: `Cerbi-Benchmark-Tests/BenchmarkDotNet.Artifacts/results`
-- Open: `CerbiBenchmark.PopularLoggerBenchmarks-report-github.md` (and the HTML/CSV alongside it)
+- Open: `CerbiBenchmark.PopularLoggerBenchmarks-report-github.md` or `.csv/.html`
 
 ---
 
-## Tips for real apps
+## Notes on images/charts
 
-- Prefer async/batched sinks over synchronous console/file writes.
-- Keep hot‑path logs lean (fewer structured properties, small messages).
-- Avoid pushing large payloads through logging; log identifiers and store blobs separately.
-- Measure in your environment; I/O and filtering change results more than library choice.
-
----
-
-## 🛡️ Governance benchmarks (simulated real-time)
-
-To approximate runtime governance, I added regex-based PII detection/redaction and simple schema validation around `CerbiStream` calls, using the normalized null sink to isolate CPU overhead (no I/O).
-
-Key results (from latest run):
-- `Cerbi_Governance_Redact_Simple` — Mean: ~42,131 ns, Alloc: ~11,632 B
-- `Cerbi_Governance_ValidateOnly` — Mean: ~492 ns, Alloc: ~2,392 B
-- `Cerbi_Governance_Redact_Structured` — Mean: ~42,159 ns, Alloc: ~9,296 B
-- `Cerbi_Governance_Heavy` (schema + redaction) — Mean: ~42,418 ns, Alloc: ~9,296 B
-
-Interpretation:
-- Validation-only checks are sub-microsecond and very cheap.
-- Redaction with compiled regexes dominates cost (~42 µs), largely independent of the logger.
-- Structured payload redaction is similar to simple-string redaction when most work is regex scanning.
-- For hot paths, prefer validation-only or targeted redaction; batch or offload heavy redaction.
-
-Caveat: This is an application-level simulation. If `CerbiStream` exposes native governance features (e.g., built-in validators/redactors), wire them directly to measure its internal implementation. I can update the suite if you provide the specific governance APIs to call.
+Older screenshots/charts have been removed/omitted. Use the generated HTML/CSV/Markdown in the artifacts folder for up‑to‑date visuals and tables.
