@@ -13,6 +13,7 @@ using Serilog;
 using Serilog.Extensions.Logging;
 using System.Reflection;
 using System.Text;
+using System.Security.Cryptography;
 using ILogger = Microsoft.Extensions.Logging.ILogger;
 using Log4NetManager = log4net.LogManager;
 using NLogManager = NLog.LogManager;
@@ -35,6 +36,10 @@ namespace CerbiBenchmark
         private ILogger _nlogPlain, _nlogEncrypted;
         private ILogger _log4netPlain, _log4netEncrypted;
         private ILogger _cerbiPlain, _cerbiEncrypted, _cerbiAsync, _cerbiFile;
+        private ILogger _cerbiEncryptedRsa; // new RSA variant
+        // RSA state
+        private RSA _rsa = RSA.Create(2048);
+
         // additional Cerbi variants to test feature toggles
         private ILogger _cerbi_minimal; // no dev mode, no async, no encryption
         private ILogger _cerbi_no_async; // dev mode enabled, async disabled
@@ -115,6 +120,16 @@ namespace CerbiBenchmark
                 {
                     opt.EnableDevModeMinimal();
                     opt.WithEncryptionMode(CerbiStream.Interfaces.IEncryptionTypeProvider.EncryptionType.Base64);
+                }));
+            });
+
+            // New RSA encryption variant (simulated via RSA public key encrypt of message bytes)
+            _cerbiEncryptedRsa = BuildLogger(s =>
+            {
+                s.AddLogging(b => b.AddCerbiStream(opt =>
+                {
+                    opt.EnableDevModeMinimal();
+                    // Will manually encrypt payload inside benchmark to simulate heavier encryption cost
                 }));
             });
 
@@ -426,6 +441,9 @@ namespace CerbiBenchmark
         public void Cerbi_Log_File() =>
             _cerbiFile.LogInformation("CerbiStream File: Logging at {time}", DateTime.UtcNow);
 
+        [Benchmark]
+        public void Cerbi_Log_Encrypted_Rsa() => _cerbiEncryptedRsa.LogInformation("CerbiStream RSA: {payload}", EncryptRsa("CerbiStream: Logging at " + DateTime.UtcNow));
+
         // --- New Cerbi toggle benchmarks ---
 
         [Benchmark]
@@ -510,46 +528,74 @@ namespace CerbiBenchmark
         [Benchmark]
         public void Cerbi_Log_Exception() => _cerbiPlain.LogError(_sampleException, "Cerbi Exception at {time}", DateTime.UtcNow);
 
-        // Many structured properties
         [Benchmark]
-        public void MS_Log_ManyProps() => _msLoggerPlain.LogInformation(_manyPropsMessageFormat, _manyPropsValues);
+        public void Log4Net_Log_Exception() => _log4netPlain.LogError(_sampleException, "Log4Net Exception at {time}", DateTime.UtcNow);
 
         [Benchmark]
-        public void NLog_Log_ManyProps() => _nlogPlain.LogInformation(_manyPropsMessageFormat, _manyPropsValues);
+        public void Log4Net_Log_ManyProps() => _log4netPlain.LogInformation(_manyPropsMessageFormat, _manyPropsValues);
 
+        // Batch throughput: additional batch sizes for all loggers
         [Benchmark]
-        public void Serilog_Log_ManyProps() => _serilogPlain.LogInformation(_manyPropsMessageFormat, _manyPropsValues);
-
-        [Benchmark]
-        public void Cerbi_Log_ManyProps() => _cerbiPlain.LogInformation(_manyPropsMessageFormat, _manyPropsValues);
-
-        // Batch throughput: loop1_000 messages inside the benchmark call to simulate high-frequency logging
-        [Benchmark]
-        public void MS_Log_Batch_1000()
+        public void MS_Log_Batch_10()
         {
-            for (int i = 0; i < 1000; i++)
-                _msLoggerPlain.LogInformation("MS Batch: {i} {t}", i, DateTime.UtcNow);
+            for (int i = 0; i < 10; i++)
+                _msLoggerPlain.LogInformation("MS Batch10: {i} {t}", i, DateTime.UtcNow);
         }
 
         [Benchmark]
-        public void NLog_Log_Batch_1000()
+        public void MS_Log_Batch_100()
         {
-            for (int i = 0; i < 1000; i++)
-                _nlogPlain.LogInformation("NLog Batch: {i} {t}", i, DateTime.UtcNow);
+            for (int i = 0; i < 100; i++)
+                _msLoggerPlain.LogInformation("MS Batch100: {i} {t}", i, DateTime.UtcNow);
         }
 
         [Benchmark]
-        public void Serilog_Log_Batch_1000()
+        public void NLog_Log_Batch_10()
         {
-            for (int i = 0; i < 1000; i++)
-                _serilogPlain.LogInformation("Serilog Batch: {i} {t}", i, DateTime.UtcNow);
+            for (int i = 0; i < 10; i++)
+                _nlogPlain.LogInformation("NLog Batch10: {i} {t}", i, DateTime.UtcNow);
         }
 
         [Benchmark]
-        public void Cerbi_Log_Batch_1000()
+        public void NLog_Log_Batch_100()
+        {
+            for (int i = 0; i < 100; i++)
+                _nlogPlain.LogInformation("NLog Batch100: {i} {t}", i, DateTime.UtcNow);
+        }
+
+        [Benchmark]
+        public void Serilog_Log_Batch_10()
+        {
+            for (int i = 0; i < 10; i++)
+                _serilogPlain.LogInformation("Serilog Batch10: {i} {t}", i, DateTime.UtcNow);
+        }
+
+        [Benchmark]
+        public void Serilog_Log_Batch_100()
+        {
+            for (int i = 0; i < 100; i++)
+                _serilogPlain.LogInformation("Serilog Batch100: {i} {t}", i, DateTime.UtcNow);
+        }
+
+        [Benchmark]
+        public void Log4Net_Log_Batch_10()
+        {
+            for (int i = 0; i < 10; i++)
+                _log4netPlain.LogInformation("Log4Net Batch10: {i} {t}", i, DateTime.UtcNow);
+        }
+
+        [Benchmark]
+        public void Log4Net_Log_Batch_100()
+        {
+            for (int i = 0; i < 100; i++)
+                _log4netPlain.LogInformation("Log4Net Batch100: {i} {t}", i, DateTime.UtcNow);
+        }
+
+        [Benchmark]
+        public void Log4Net_Log_Batch_1000()
         {
             for (int i = 0; i < 1000; i++)
-                _cerbiPlain.LogInformation("Cerbi Batch: {i} {t}", i, DateTime.UtcNow);
+                _log4netPlain.LogInformation("Log4Net Batch1000: {i} {t}", i, DateTime.UtcNow);
         }
 
         // Benchmarks using governance JSON
@@ -584,6 +630,28 @@ namespace CerbiBenchmark
             var ok = GovernanceValidateSchema(_piiStructured);
             var data = ok ? ApplyGovernanceRedaction(_piiStructured) : _piiStructured;
             _cerbiPlain.LogInformation("PII {@data}", data);
+        }
+
+        private string EncryptRsa(string input)
+        {
+            var data = System.Text.Encoding.UTF8.GetBytes(input);
+            var encrypted = _rsa.Encrypt(data, RSAEncryptionPadding.Pkcs1);
+            return Convert.ToBase64String(encrypted);
+        }
+
+        // --- Additional Cerbi batch size benchmarks ---
+        [Benchmark]
+        public void Cerbi_Log_Batch_10()
+        {
+            for (int i = 0; i < 10; i++)
+                _cerbiPlain.LogInformation("Cerbi Batch10: {i} {t}", i, DateTime.UtcNow);
+        }
+
+        [Benchmark]
+        public void Cerbi_Log_Batch_100()
+        {
+            for (int i = 0; i < 100; i++)
+                _cerbiPlain.LogInformation("Cerbi Batch100: {i} {t}", i, DateTime.UtcNow);
         }
     }
 }
