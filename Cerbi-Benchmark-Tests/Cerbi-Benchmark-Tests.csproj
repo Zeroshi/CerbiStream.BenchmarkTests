@@ -1,30 +1,37 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-	<PropertyGroup>
-		<OutputType>Exe</OutputType>
-		<TargetFramework>net9.0</TargetFramework>
-		<RootNamespace>Cerbi_Benchmark_Tests</RootNamespace>
-		<ImplicitUsings>enable</ImplicitUsings>
-		<Nullable>enable</Nullable>
-		<ServerGarbageCollection>true</ServerGarbageCollection>
-		<GarbageCollectionAdaptationMode>0</GarbageCollectionAdaptationMode>
-	</PropertyGroup>
+<PropertyGroup>
+<OutputType>Exe</OutputType>
+<TargetFramework>net9.0</TargetFramework>
+<RootNamespace>Cerbi_Benchmark_Tests</RootNamespace>
+<ImplicitUsings>enable</ImplicitUsings>
+<Nullable>enable</Nullable>
+<ServerGarbageCollection>true</ServerGarbageCollection>
+<GarbageCollectionAdaptationMode>0</GarbageCollectionAdaptationMode>
+</PropertyGroup>
 
-	<ItemGroup>
-		<PackageReference Include="BenchmarkDotNet" Version="0.15.6" />
-		<PackageReference Include="CerbiStream" Version="1.1.72" />
-		<PackageReference Include="log4net" Version="3.2.0" />
-		<PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.10" />
-		<PackageReference Include="Microsoft.Extensions.Logging.Console" Version="9.0.10" />
-		<PackageReference Include="Microsoft.Extensions.Logging.Log4Net.AspNetCore" Version="8.0.0" />
-		<PackageReference Include="NLog" Version="6.0.6" />
-		<PackageReference Include="NLog.Extensions.Logging" Version="6.0.6" />
-		<PackageReference Include="Serilog" Version="4.3.0" />
-		<PackageReference Include="Serilog.Extensions.Logging" Version="9.0.2" />
-		<PackageReference Include="Serilog.Sinks.Async" Version="2.1.0" />
-		<PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
-		<PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
-	</ItemGroup>
+<ItemGroup>
+<!-- Benchmarking framework -->
+<PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
+		
+<!-- CerbiStream ecosystem (latest) -->
+<PackageReference Include="CerbiStream" Version="1.1.88" />
+<PackageReference Include="Cerbi.Governance.Runtime" Version="1.1.10" />
+<PackageReference Include="Cerbi.Governance.Core" Version="1.0.15" />
+		
+<!-- Competing loggers (latest stable) -->
+<PackageReference Include="log4net" Version="3.2.0" />
+<PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.10" />
+<PackageReference Include="Microsoft.Extensions.Logging.Console" Version="9.0.10" />
+<PackageReference Include="Microsoft.Extensions.Logging.Log4Net.AspNetCore" Version="8.0.0" />
+<PackageReference Include="NLog" Version="6.0.7" />
+<PackageReference Include="NLog.Extensions.Logging" Version="6.1.0" />
+<PackageReference Include="Serilog" Version="4.3.0" />
+<PackageReference Include="Serilog.Extensions.Logging" Version="9.0.2" />
+<PackageReference Include="Serilog.Sinks.Async" Version="2.1.0" />
+<PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+<PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+</ItemGroup>
 
 	<ItemGroup>
 		<None Update="log4net.config">
